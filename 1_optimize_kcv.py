@@ -114,15 +114,13 @@ def save_best_agent(study, trial):
 
 
 def sample_hyperparams(trial):
-    average_episode_step_min = no_candles_for_train + 0.25 * no_candles_for_train
+    # Paper Table 2 search space (arxiv:2209.05559v6)
     sampled_erl_params = {
         "learning_rate": trial.suggest_categorical("learning_rate", [3e-2, 2.3e-2, 1.5e-2, 7.5e-3, 5e-6]),
         "batch_size": trial.suggest_categorical("batch_size", [512, 1280, 2048, 3080]),
-        "gamma": trial.suggest_categorical("gamma", [0.85, 0.99, 0.999]),
-        "net_dimension": trial.suggest_categorical("net_dimension", [2 ** 9, 2 ** 10, 2 ** 11, 2 ** 12]),
-        "target_step": trial.suggest_categorical("target_step",
-                                                 [average_episode_step_min, round(1.5 * average_episode_step_min),
-                                                  2 * average_episode_step_min]),
+        "gamma": trial.suggest_categorical("gamma", [0.95, 0.96, 0.97, 0.98, 0.99]),
+        "net_dimension": trial.suggest_categorical("net_dimension", [2 ** 9, 2 ** 10, 2 ** 11]),
+        "target_step": trial.suggest_categorical("target_step", [2500, 3750, 5000]),
         "eval_time_gap": trial.suggest_categorical("eval_time_gap", [60]),
         "break_step": trial.suggest_categorical("break_step", [3e4, 4.5e4, 6e4])
     }

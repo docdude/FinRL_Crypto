@@ -65,7 +65,7 @@ def aggregate_performance_ndarray(drl_rets_arr, factor):
 def aggregate_performance_array(drl_rets_arr, factor):
     annual_ret = annual_geometric_returns(drl_rets_arr, ann_factor=365, log=False)
     annual_vol = calc_annualized_volatility(drl_rets_arr, factor=factor)
-    sharpe_rat, vol = sharpe_iid(drl_rets_arr, bench=0, factor=1, log=False)
+    sharpe_rat, vol = sharpe_iid(drl_rets_arr, bench=0, factor=factor, log=False)
     max_dd = max_drawdown_single(drl_rets_arr, 10)
     return annual_ret, annual_vol, sharpe_rat, vol
 

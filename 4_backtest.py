@@ -242,7 +242,7 @@ for count, result in enumerate(pickle_results):
         spy_index_df['Date'] = pd.to_datetime(spy_index_df['Date'])
 
         account_value_spy = np.array(spy_index_df['S&P index'])
-        spy_rets = account_value_spy[:-1] / account_value_spy[1:] - 1
+        spy_rets = account_value_spy[1:] / account_value_spy[:-1] - 1
         spy_rets = np.insert(spy_rets, 0, 0)
         spy_index_df['cumrets_sp_idx'] = [x / spy_index_df['S&P index'][0] - 1 for x in spy_index_df['S&P index']]
         spy_index_df['rets_sp_idx'] = spy_rets
