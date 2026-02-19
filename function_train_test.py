@@ -106,12 +106,11 @@ def test_agent(price_array, tech_array, test_indices, env, env_params, model_nam
 
     data_points_per_year = compute_data_points_per_year(trial.user_attrs["timeframe"])
     account_value_eqw, eqw_rets_tmp, eqw_cumrets = compute_eqw(price_array_test, indice_start, indice_end)
-    dataset_size = np.shape(eqw_rets_tmp)[0]
-    factor = data_points_per_year / dataset_size
+    factor = data_points_per_year  # Bug 6 fix: sharpe_iid already takes sqrt, factor = periods/year
     sharpe_eqw, _ = sharpe_iid(eqw_rets_tmp, bench=0, factor=factor, log=False)
 
     account_value_erl = np.array(account_value_erl)
-    drl_rets_tmp = account_value_erl[1:] - account_value_erl[:-1]
+    drl_rets_tmp = account_value_erl[1:] / account_value_erl[:-1] - 1  # Bug 4 fix: percentage returns, not dollar
     sharpe_bot, _ = sharpe_iid(drl_rets_tmp, bench=0, factor=factor, log=False)
 
     return sharpe_bot, sharpe_eqw, drl_rets_tmp

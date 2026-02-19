@@ -224,12 +224,11 @@ for count, result in enumerate(pickle_results):
 
     # Compute annualization factor
     data_points_per_year = compute_data_points_per_year(timeframe)
-    dataset_size = np.shape(ewq_rets)[0]
-    factor = data_points_per_year / dataset_size
+    factor = data_points_per_year  # Bug 6 fix: sharpe_iid uses sqrt(factor)
 
     # Compute DRL rets
     account_value_erl = np.array(account_value_erl)
-    drl_rets = account_value_erl[1:] - account_value_erl[:-1]
+    drl_rets = account_value_erl[1:] / account_value_erl[:-1] - 1  # Bug 4 fix: percentage returns
     drl_cumrets = [x / account_value_erl[0] - 1 for x in account_value_erl]
     drl_cumrets_list.append(drl_cumrets)
 

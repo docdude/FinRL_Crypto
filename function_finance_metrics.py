@@ -122,7 +122,7 @@ def compute_eqw(price_ary, indx1, indx2):
         account_value_eqw.append(np.sum(equal_weight * price_ary[i]))
     eqw_cumrets = [x / account_value_eqw[0] - 1 for x in account_value_eqw]
     account_value_eqw = np.array(account_value_eqw)
-    eqw_rets_tmp = account_value_eqw[:-1] / account_value_eqw[1:] - 1
+    eqw_rets_tmp = account_value_eqw[1:] / account_value_eqw[:-1] - 1  # Bug 5 fix: next/prev, not prev/next
     return account_value_eqw, eqw_rets_tmp, eqw_cumrets
 
 
