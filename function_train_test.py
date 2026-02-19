@@ -22,7 +22,7 @@ and the equal-weighted portfolio, as well as the returns for the DRL agent.
 
 import numpy as np
 from drl_agents.elegantrl_models import DRLAgent as DRLAgent_erl
-from processor_Binance import BinanceProcessor
+# from processor_Binance import BinanceProcessor
 from function_finance_metrics import (compute_data_points_per_year,
                                       compute_eqw,
                                       sharpe_iid)

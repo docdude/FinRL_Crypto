@@ -1,5 +1,5 @@
 import sys
-import gym
+import gymnasium as gym
 from elegantrl.train.run import *
 from elegantrl.agents import *
 from elegantrl.train.config import Arguments

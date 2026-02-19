@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+dist/
+build/
+.env
+train_results/
+binance_data/
+binance_train_data/
+data/5m_25000/
+data/trade_data/
+plots_and_metrics/*.html
+=2.5.0
+*.pdf

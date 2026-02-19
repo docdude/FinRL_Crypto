@@ -35,7 +35,7 @@ class bcolors: : This class defines the color codes for the terminal output.
 
 import joblib
 import optuna
-import datetime
+from datetime import datetime
 import pickle
 import os
 import sys
@@ -95,7 +95,16 @@ def set_Pandas_Timedelta(TIMEFRAME):
 
 
 def save_best_agent(study, trial):
-    if study.best_trial.number != trial.number:
+    # Skip if no trials have completed yet or if trial failed
+    try:
+        if len(study.trials) == 0:
+            return
+        if study.best_trial is None:
+            return
+        if study.best_trial.number != trial.number:
+            return
+    except (ValueError, AttributeError):
+        # Handle case where no trials have completed yet or best_trial is not available
         return
 
     print('\n' + bcolors.OKGREEN + 'Found new best agent!' + bcolors.ENDC + '\n')
@@ -115,15 +124,29 @@ def save_best_agent(study, trial):
 
 
 def sample_hyperparams(trial):
-    average_episode_step_min = no_candles_for_train + 0.25 * no_candles_for_train
+    # Data-aware constraints to prevent buffer overflow
+    # Calculate maximum viable batch size based on available data
+    max_episode_steps = no_candles_for_train * 0.8  # Conservative estimate of usable data
+    max_viable_batch_size = min(1024, int(max_episode_steps * 0.7))  # 70% of episode length
+
+    # Adjust target_step options based on actual data availability
+    average_episode_step_min = min(no_candles_for_train * 0.6, max_episode_steps)
+    target_step_options = [
+        min(average_episode_step_min, max_episode_steps),
+        min(round(1.5 * average_episode_step_min), max_episode_steps),
+        min(2 * average_episode_step_min, max_episode_steps)
+    ]
+
     sampled_erl_params = {
         "learning_rate": trial.suggest_categorical("learning_rate", [3e-2, 2.3e-2, 1.5e-2, 7.5e-3, 5e-6]),
-        "batch_size": trial.suggest_categorical("batch_size", [512, 1280, 2048, 3080]),
+        # Data-aware batch size constraints
+        "batch_size": trial.suggest_categorical("batch_size",
+                                               [128, 256, 512, max_viable_batch_size]),
         "gamma": trial.suggest_categorical("gamma", [0.85, 0.99, 0.999]),
-        "net_dimension": trial.suggest_categorical("net_dimension", [2 ** 9, 2 ** 10, 2 ** 11, 2 ** 12]),
-        "target_step": trial.suggest_categorical("target_step",
-                                                 [average_episode_step_min, round(1.5 * average_episode_step_min),
-                                                  2 * average_episode_step_min]),
+        # Smaller network dimensions for data-constrained training
+        "net_dimension": trial.suggest_categorical("net_dimension", [2 ** 8, 2 ** 9, 2 ** 10, min(2 ** 11, max_viable_batch_size)]),
+        # Data-aware target_step options
+        "target_step": trial.suggest_categorical("target_step", target_step_options),
         "eval_time_gap": trial.suggest_categorical("eval_time_gap", [60]),
         "break_step": trial.suggest_categorical("break_step", [3e4, 4.5e4, 6e4])
     }
@@ -187,6 +210,8 @@ def write_logs(name_folder, model_name, trial, cwd, erl_params, env_params, num_
 
 
 def setup_CPCV(data_from_processor, erl_params, tech_array, time_array, NUM_PATHS, K_TEST_GROUPS, TIMEFRAME):
+    # Set constants - Use CCXT environment for crypto trading
+    #env = CryptoEnvCCXT
     # Set constants
     env = CryptoEnvAlpaca
     break_step = erl_params["break_step"]
@@ -220,7 +245,27 @@ def setup_CPCV(data_from_processor, erl_params, tech_array, time_array, NUM_PATH
     return cv, env, data, y, num_paths, paths, n_total_groups, n_splits, break_step, prediction_times, evaluation_times
 
 
+def _json_safe(val):
+    """Convert numpy/pandas types to plain Python for SQLite-backed Optuna storage."""
+    import numpy as _np
+    import pandas as _pd
+    if isinstance(val, _np.ndarray):
+        return val.tolist()
+    if isinstance(val, (_np.integer, _np.floating)):
+        return val.item()
+    if isinstance(val, (_pd.Index, _pd.Series)):
+        return [str(v) if hasattr(v, 'isoformat') else v for v in val]
+    if isinstance(val, list):
+        return [_json_safe(v) for v in val]
+    if hasattr(val, 'isoformat'):  # pandas Timestamp / datetime
+        return str(val)
+    return val
+
+
 def objective(trial, name_test, model_name, cwd, res_timestamp, gpu_id):
+    # Wrap set_user_attr to auto-convert numpy/pandas types for SQLite JSON storage
+    _orig_set_user_attr = trial.set_user_attr
+    trial.set_user_attr = lambda key, value: _orig_set_user_attr(key, _json_safe(value))
 
     # Set full name_folder
     name_folder = res_timestamp + '_' + name_test
@@ -233,6 +278,19 @@ def objective(trial, name_test, model_name, cwd, res_timestamp, gpu_id):
 
     # Load data from hard disk
     data_from_processor, price_array, tech_array, time_array = load_saved_data(TIMEFRAME, no_candles_for_train)
+
+    # Validate hyperparameters against available data
+    max_episode_length = price_array.shape[0] - env_params.get('lookback', 1) - 1
+
+    # Additional validation for extreme cases
+    if erl_params['batch_size'] > max_episode_length:
+        print(f"Warning: batch_size ({erl_params['batch_size']}) > max_episode_length ({max_episode_length})")
+        # Force compatible batch_size
+        erl_params['batch_size'] = min(erl_params['batch_size'], max(max_episode_length // 2, 1))
+
+    if erl_params['net_dimension'] > 2048 and max_episode_length < 1000:
+        print(f"Warning: Large network ({erl_params['net_dimension']}) with limited data ({max_episode_length})")
+        erl_params['net_dimension'] = min(erl_params['net_dimension'], 1024)
 
     # Setup Combinatorial Purged Cross-Validation
     cpcv, \
@@ -269,6 +327,10 @@ def objective(trial, name_test, model_name, cwd, res_timestamp, gpu_id):
         sharpe_bot, sharpe_eqw, drl_rets_tmp = train_and_test(trial, price_array, tech_array, train_indices,
                                                               test_indices, env, model_name, env_params,
                                                               erl_params, break_step, cwd, gpu_id)
+
+        # Handle NaN values by replacing with 0
+        sharpe_bot = 0.0 if np.isnan(sharpe_bot) else sharpe_bot
+        sharpe_eqw = 0.0 if np.isnan(sharpe_eqw) else sharpe_eqw
 
         sharpe_list_ewq.append(sharpe_eqw)
         sharpe_list_bot.append(sharpe_bot)
@@ -328,8 +390,11 @@ def optimize(name_test, model_name, gpu_id):
         return objective(trial, name_test, model_name, cwd, res_timestamp, gpu_id)
 
     sampler = optuna.samplers.TPESampler(multivariate=True, seed=SEED_CFG)
+    db_path = f'sqlite:///train_results/optuna_cpcv_{res_timestamp}.db'
     study = optuna.create_study(
-        study_name=None,
+        study_name='cpcv_ppo',
+        storage=db_path,
+        load_if_exists=True,
         direction='maximize',
         sampler=sampler,
         pruner=optuna.pruners.HyperbandPruner(
@@ -338,6 +403,7 @@ def optimize(name_test, model_name, gpu_id):
             reduction_factor=3
         )
     )
+    print(f'Optuna DB: {db_path}')
     study.optimize(
         obj_with_argument,
         n_trials=H_TRIALS,

@@ -1,0 +1,21 @@
+
+################################## S&P Broad Crypto index ####################################
+Cumulative return:           -50.782529838520944
+Annual return:               357.1063525717203
+Annual volatility:           0.15483537712253587
+Sharpe ratio:                0.277443401314993
+Volatiltiy:                  5.807258e-02
+
+################################## Buy-and-Hold ####################################
+Cumulative return:           -51.322091351959884
+Annual return:               0.015860611058355456
+Annual volatility:           0.010294794971565616
+Sharpe ratio:                0.010508860676622921
+Volatiltiy:                  4.101561e-03
+
+################################## ppo ####################################
+Cumulative return:           -66.07795071861973
+Annual return:               -1.0
+Annual volatility:           6215.954005404109
+Sharpe ratio:                -0.38767674851705325
+Volatiltiy:                  1.089315e+01

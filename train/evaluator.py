@@ -268,7 +268,7 @@ def save_learning_curve(
 
 
 def demo_evaluator_actor_pth():
-    import gym
+    import gymnasium as gym
     from elegantrl.agents import AgentPPO
     from elegantrl.train.config import build_env
 
@@ -309,7 +309,7 @@ def demo_evaluator_actor_pth():
 
 
 def demo_evaluate_actors(dir_path, gpu_id, agent, env_args, eval_times=2, net_dim=128):
-    import gym
+    import gymnasium as gym
     from elegantrl.train.config import build_env
 
     # dir_path = './LunarLanderContinuous-v2_PPO_1'

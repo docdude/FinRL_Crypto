@@ -3,6 +3,7 @@ of an Optuna optimization study. The class has one method 'analyze' which loads 
 retrieves some lists of data from the best trial, plots some Optuna visualization, prints some information and calls
 some external functions."""
 
+import sys
 import optuna
 import joblib
 from function_finance_metrics import *
@@ -26,11 +27,12 @@ class StudyAnalyzer:
 
         # Plot Optuna optimization
         fig = optuna.visualization.plot_optimization_history(self.study)
-        fig.show()
+        fig.write_html(f'{self.image_path}/optuna_optimization_history.html')
         fig = optuna.visualization.plot_parallel_coordinate(self.study)
-        fig.show()
+        fig.write_html(f'{self.image_path}/optuna_parallel_coordinate.html')
         fig = optuna.visualization.plot_param_importances(self.study)
-        fig.show()
+        fig.write_html(f'{self.image_path}/optuna_param_importances.html')
+        print(f'\nPlots saved to {self.image_path}/')
 
         print(self.sharpe_list_drl)
 
@@ -50,6 +52,19 @@ class StudyAnalyzer:
 
 
 if __name__ == "__main__":
-    pickle_result = input("Enter pickle result dir: ")
+    if len(sys.argv) > 1:
+        pickle_result = sys.argv[1]
+    else:
+        # List available result directories
+        results_dir = 'train_results'
+        dirs = [d for d in os.listdir(results_dir)
+                if os.path.isdir(os.path.join(results_dir, d)) and d.startswith('res_')]
+        dirs.sort()
+        print('Available result directories:')
+        for i, d in enumerate(dirs):
+            print(f'  [{i}] {d}')
+        idx = int(input('Select index: '))
+        pickle_result = dirs[idx]
+    print(f'Analyzing: {pickle_result}')
     study_analyzer = StudyAnalyzer(pickle_result)
     study_analyzer.analyze()

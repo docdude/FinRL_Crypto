@@ -16,6 +16,7 @@ all the input DRL agents are analyzed.
 """
 
 
+import os
 import pickle
 import matplotlib.dates as mdates
 
@@ -23,6 +24,7 @@ from config_main import *
 from function_finance_metrics import *
 from processor_Yahoo import Yahoofinance
 from environment_Alpaca import CryptoEnvAlpaca
+#from environment_CCXT import CryptoEnvCCXT
 from drl_agents.elegantrl_models import DRLAgent as DRLAgent_erl
 
 
@@ -56,14 +58,78 @@ def load_validated_model(result):
 
 
 def download_CVIX(trade_start_date, trade_end_date):
-    trade_start_date = trade_start_date[:10]
-    trade_end_date = trade_end_date[:10]
-    TIME_INTERVAL = '60m'
-    YahooProcessor = Yahoofinance('yahoofinance', trade_start_date, trade_end_date, TIME_INTERVAL)
-    CVOL_df = YahooProcessor.download_data(['CVOL-USD'])
-    CVOL_df.set_index('date', inplace=True)
-    CVOL_df = CVOL_df.resample('5Min').interpolate(method='linear')
-    return CVOL_df['close']
+    """Download crypto volatility index data.
+
+    Primary: Deribit DVOL (BTC implied volatility index) — free public API.
+    Fallback: Yahoo CVOL-USD (delisted as of ~2024).
+    """
+    trade_start = trade_start_date[:10]
+    trade_end = trade_end_date[:10]
+
+    # --- Try Deribit DVOL first ---
+    try:
+        from urllib.request import urlopen, Request
+        import json
+        from datetime import datetime as dt, timezone
+
+        start_ms = int(dt.strptime(trade_start, '%Y-%m-%d').replace(tzinfo=timezone.utc).timestamp() * 1000)
+        end_ms = int(dt.strptime(trade_end, '%Y-%m-%d').replace(tzinfo=timezone.utc).timestamp() * 1000)
+
+        # Deribit limits to 1000 entries per call, fetch in chunks
+        all_entries = []
+        chunk_start = start_ms
+        while chunk_start < end_ms:
+            url = (f'https://www.deribit.com/api/v2/public/get_volatility_index_data'
+                   f'?currency=BTC&start_timestamp={chunk_start}'
+                   f'&end_timestamp={end_ms}&resolution=3600')
+            req = Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            resp = urlopen(req, timeout=30)
+            data = json.loads(resp.read())
+            entries = data['result']['data']
+            if not entries:
+                break
+            all_entries.extend(entries)
+            # Move past the last entry
+            chunk_start = entries[-1][0] + 1
+
+        if not all_entries:
+            raise ValueError('Deribit DVOL returned no data')
+
+        # Deduplicate and sort
+        seen = set()
+        unique = []
+        for e in all_entries:
+            if e[0] not in seen:
+                seen.add(e[0])
+                unique.append(e)
+        unique.sort(key=lambda x: x[0])
+
+        # Build DataFrame: [timestamp, open, high, low, close]
+        dvol_df = pd.DataFrame(unique, columns=['ts', 'open', 'high', 'low', 'close'])
+        dvol_df.index = pd.to_datetime(dvol_df['ts'], unit='ms', utc=True)
+        dvol_df = dvol_df[['close']]
+        dvol_df = dvol_df.resample('5Min').interpolate(method='linear')
+        print(f'  DVOL (Deribit): {len(dvol_df)} points, '
+              f'range {dvol_df["close"].min():.1f}-{dvol_df["close"].max():.1f}')
+        return dvol_df['close']
+
+    except Exception as e:
+        print(f'  Deribit DVOL failed: {e}')
+
+    # --- Fallback: Yahoo CVOL-USD ---
+    try:
+        import yfinance as yf
+        df = yf.download('CVOL-USD', start=trade_start, end=trade_end, interval='60m')
+        if df.empty:
+            raise ValueError('CVOL-USD returned no data (likely delisted)')
+        df = df[['Close']].rename(columns={'Close': 'close'})
+        df = df.resample('5Min').interpolate(method='linear')
+        return df['close']
+    except Exception as e:
+        print(f'  Yahoo CVOL-USD failed: {e}')
+
+    print('  WARNING: No volatility index available. Backtest will run WITHOUT CVIX risk control.\n')
+    return None
 
 
 def load_and_process_data(TIMEFRAME, trade_start_date, trade_end_date):
@@ -78,10 +144,14 @@ def load_and_process_data(TIMEFRAME, trade_start_date, trade_end_date):
     with open(data_folder + '/time_array', 'rb') as handle:
         time_array = pickle.load(handle)
 
-    CVIX_df = download_CVIX(trade_start_date, trade_end_date)
-    CVIX_df = pd.merge(time_array.to_series(), CVIX_df, left_index=True, right_index=True, how='left')
-    cvix_array = CVIX_df['close'].values
-    cvix_array_growth = np.diff(cvix_array)
+    CVIX_series = download_CVIX(trade_start_date, trade_end_date)
+    if CVIX_series is not None:
+        CVIX_df = pd.merge(time_array.to_series(), CVIX_series, left_index=True, right_index=True, how='left')
+        cvix_array = CVIX_df.iloc[:, -1].values
+        cvix_array_growth = np.diff(cvix_array)
+    else:
+        cvix_array = None
+        cvix_array_growth = None
 
     return data_from_processor, price_array, tech_array, time_array, cvix_array, cvix_array_growth
 
@@ -94,9 +164,7 @@ def load_and_process_data(TIMEFRAME, trade_start_date, trade_end_date):
 print('TRADE_START_DATE             ', trade_start_date)
 print('TRADE_END_DATE               ', trade_end_date, '\n')
 
-pickle_results = ["res_2023-01-23__16_32_55_model_WF_ppo_5m_3H_20k",
-                  "res_2023-01-23__17_07_49_model_KCV_ppo_5m_3H_20005k",
-                  "res_2023-01-23__16_44_30_model_CPCV_ppo_5m_3H_20k"
+pickle_results = ["res_2026-02-18__05_04_45_model_CPCV_ppo_5m_50H_25k",
                   ]
 
 # Execution
@@ -112,7 +180,10 @@ data_from_processor, price_array, tech_array, time_array, cvix_array, cvix_array
 for count, result in enumerate(pickle_results):
     env_params, net_dim, timeframe, ticker_list, technical_ind, name_test, model_name = load_validated_model(result)
     model_names_list.append(model_name)
+
+    # Use stored_agent from optimization (original pipeline has no retrain step)
     cwd = './train_results/' + result + '/stored_agent/'
+    print(f'  Using stored agent: {cwd}')
 
     data_config = {
         "cvix_array": cvix_array,
@@ -144,7 +215,7 @@ for count, result in enumerate(pickle_results):
     time_array = time_array[indice_start:indice_end]
 
     # Slice cvix array
-    if count == 0:
+    if count == 0 and cvix_array is not None:
         cvix_array = cvix_array[indice_start:indice_end]
         cvix_array_growth = cvix_array_growth[indice_start:indice_end]
 
@@ -244,21 +315,23 @@ ax1.patch.set_linewidth(3)
 ax1.grid()
 
 # Plot CVIX
-ax2 = ax1.twinx()
-ax2.plot(time_array, cvix_array, linewidth=4, label='CVIX', color='black', linestyle='dashed', alpha=0.4)
-ax2.legend(frameon=False, loc='upper right', bbox_to_anchor=(0.7, 1.17))
-ax2.patch.set_edgecolor('black')
-ax2.patch.set_linewidth(3)
-ax2.set_ylabel('CVIX')
+if cvix_array is not None:
+    ax2 = ax1.twinx()
+    ax2.plot(time_array, cvix_array, linewidth=4, label='CVIX', color='black', linestyle='dashed', alpha=0.4)
+    ax2.legend(frameon=False, loc='upper right', bbox_to_anchor=(0.7, 1.17))
+    ax2.patch.set_edgecolor('black')
+    ax2.patch.set_linewidth(3)
+    ax2.set_ylabel('CVIX')
 ax1.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
 ax1.xaxis.set_major_locator(mdates.DayLocator(interval=8))
 ax1.set_ylabel('Cumulative return')
 plt.xlabel('Date')
 plt.legend()
 plt.savefig('./plots_and_metrics/test_cumulative_return.png', bbox_inches='tight')
-ax2.patch.set_edgecolor('black')
-ax2.patch.set_linewidth(3)
-ax2.set_ylabel('CVIX')
+if cvix_array is not None:
+    ax2.patch.set_edgecolor('black')
+    ax2.patch.set_linewidth(3)
+    ax2.set_ylabel('CVIX')
 ax1.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
 ax1.xaxis.set_major_locator(mdates.DayLocator(interval=8))
 ax1.set_ylabel('Cumulative return')

@@ -1,4 +1,5 @@
 import joblib
+import pickle
 import seaborn as sns
 import math
 from function_finance_metrics import *
@@ -35,7 +36,7 @@ def load_validated_model(pickle_result):
     print('BEST TRIAL: ', best_trial_number)
 
     trials = study.trials
-    number_of_trials = len(trials) - 1
+    number_of_trials = len(trials)
     name_test = trials[0].user_attrs['name_test']
     timeframe = trials[0].user_attrs['timeframe']
     model_name = trials[0].user_attrs['model_name']
@@ -50,7 +51,7 @@ def build_matrix_M_splits(trials, number_of_trials):
         drl_rets_val_list = trial.user_attrs['drl_rets_val_list']
         drl_rets_val_list= add_samples_equify_array_length(drl_rets_val_list)
         rets_single_trial = np.vstack(drl_rets_val_list)
-        rets_single_trial = np.mean(rets_single_trial, axis=0)
+        rets_single_trial = np.mean(rets_single_trial, axis=1)
         matrix_cumrets_val.append(rets_single_trial)
     matrix_cumrets_val = np.transpose(np.vstack(matrix_cumrets_val))
     return matrix_cumrets_val
@@ -71,10 +72,9 @@ def build_matrix_M_no_splits(trials, number_of_trials):
 #######################################################################################################
 
 pickle_results = [
-                  "res_2023-01-23__17_07_49_model_KCV_ppo_5m_3H_20005k",
-                  "res_2023-01-23__16_44_30_model_CPCV_ppo_5m_3H_20k"
+                  "res_2026-02-18__05_04_45_model_CPCV_ppo_5m_50H_25k",
                   ]
-S = 14
+S = 14  # Paper: "We split M into 14 submatrices"
 
 # Execution
 #######################################################################################################
@@ -95,6 +95,7 @@ for count, result in enumerate(pickle_results):
     #     M = build_matrix_M_no_splits(trials, number_of_trials)
     # else:
     M = build_matrix_M_splits(trials, number_of_trials)
+    print(f'Matrix M shape: {M.shape}  (expect ~T\' x H = ~10012 x {number_of_trials})')
 
     pbox = pbo(M,
                S=S,
@@ -126,7 +127,7 @@ for count, result in enumerate(pickle_results):
 #######################################################################################################
 
 #model_names_list = ['ppo', 'sac', 'td3']
-model_names = ['WF', 'KCV', 'CPCV']
+#model_names = ['WF', 'KCV', 'CPCV']  # only use when running all 3
 
 model_names = [name.upper() for name in model_names]
 sns.set(rc={'figure.figsize': (10, 6)})

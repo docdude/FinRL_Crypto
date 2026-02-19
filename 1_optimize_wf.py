@@ -25,7 +25,7 @@ results."""
 
 import joblib
 import optuna
-import datetime
+from datetime import datetime
 import pickle
 import os
 
@@ -34,6 +34,7 @@ from distutils.dir_util import copy_tree
 import pandas as pd
 
 from environment_Alpaca import CryptoEnvAlpaca
+from environment_CCXT import CryptoEnvCCXT
 from function_train_test import train_and_test
 from config_main import *
 
@@ -171,8 +172,28 @@ def write_logs(name_folder, model_name, trial, cwd, erl_params, env_params):
         f.write('\n' + 'TIME START OUTER: ' + str(datetime.now()) + '\n')
     return path_logs
 
+def _json_safe(val):
+    """Convert numpy/pandas types to plain Python for SQLite-backed Optuna storage."""
+    import numpy as _np
+    import pandas as _pd
+    if isinstance(val, _np.ndarray):
+        return val.tolist()
+    if isinstance(val, (_np.integer, _np.floating)):
+        return val.item()
+    if isinstance(val, (_pd.Index, _pd.Series)):
+        return [str(v) if hasattr(v, 'isoformat') else v for v in val]
+    if isinstance(val, list):
+        return [_json_safe(v) for v in val]
+    if hasattr(val, 'isoformat'):  # pandas Timestamp / datetime
+        return str(val)
+    return val
+
 
 def objective(trial, name_test, model_name, cwd, res_timestamp, gpu_id):
+    # Wrap set_user_attr to auto-convert numpy/pandas types for SQLite JSON storage
+    _orig_set_user_attr = trial.set_user_attr
+    trial.set_user_attr = lambda key, value: _orig_set_user_attr(key, _json_safe(value))
+
     # Set full name_folder
     name_folder = res_timestamp + '_' + name_test
 
@@ -193,6 +214,7 @@ def objective(trial, name_test, model_name, cwd, res_timestamp, gpu_id):
     #######################################################################################################
 
     env = CryptoEnvAlpaca
+    #env = CryptoEnvCCXT
     break_step = erl_params['break_step']
 
     sharpe_list_bot = []
@@ -257,8 +279,11 @@ def optimize(name_test, model_name, gpu_id):
         return objective(trial, name_test, model_name, cwd, res_timestamp, gpu_id)
 
     sampler = optuna.samplers.TPESampler(multivariate=True, seed=SEED_CFG)
+    db_path = f'sqlite:///train_results/optuna_wf_{res_timestamp}.db'
     study = optuna.create_study(
-        study_name=None,
+        study_name='wf_ppo',
+        storage=db_path,
+        load_if_exists=True,
         direction='maximize',
         sampler=sampler,
         pruner=optuna.pruners.HyperbandPruner(
@@ -267,6 +292,7 @@ def optimize(name_test, model_name, gpu_id):
             reduction_factor=3
         )
     )
+    print(f'Optuna DB: {db_path}')
     study.optimize(
         obj_with_argument,
         n_trials=H_TRIALS,

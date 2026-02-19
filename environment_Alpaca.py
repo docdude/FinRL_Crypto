@@ -52,6 +52,10 @@ class CryptoEnvAlpaca:  # custom env
         self.crypto_num = self.price_array.shape[1]
         self.max_step = self.price_array.shape[0] - self.lookback - 1
 
+        # CVIX risk control (paper: sell all & stop buying when CVIX > threshold)
+        self.cvix_array = config.get('cvix_array', None)
+        self.cvix_threshold = 90.1  # Paper: average CVIX during crash periods
+
         # reset
         self.time = self.lookback - 1
         self.cash = self.initial_cash
@@ -73,7 +77,8 @@ class CryptoEnvAlpaca:  # custom env
         # state_dim = cash[1,1] + stocks[1,4] + tech_array[1,44] * lookback + stock_cooldown[1,4]
         self.state_dim = 1 + self.price_array.shape[1] + self.tech_array.shape[1] * self.lookback
         self.action_dim = self.price_array.shape[1]
-        self.minimum_qty_alpaca = ALPACA_LIMITS * 1.1  # 10 % safety factor
+        # Trim ALPACA_LIMITS to match action_dim to avoid broadcasting errors
+        self.minimum_qty_alpaca = (ALPACA_LIMITS[:self.action_dim] * 1.1)  # 10 % safety factor
         self.if_discrete = False
         self.target_return = 10**8
 
@@ -98,54 +103,72 @@ class CryptoEnvAlpaca:  # custom env
                 self.stocks_cooldown[i] += 1
 
         price = self.price_array[self.time]
-        for i in range(self.action_dim):
-            norm_vector_i = self.action_norm_vector[i]
-            actions[i] = actions[i] * norm_vector_i
+
+        # CVIX risk control: sell all & stop buying when CVIX > threshold
+        cvix_active = False
+        if self.cvix_array is not None and self.time < len(self.cvix_array):
+            cvix_val = self.cvix_array[self.time]
+            if not np.isnan(cvix_val) and cvix_val > self.cvix_threshold:
+                cvix_active = True
+                # Force sell all holdings
+                for i in range(self.crypto_num):
+                    if self.stocks[i] > 0:
+                        sell_num_shares = self.stocks[i]
+                        self.stocks[i] = 0
+                        self.stocks_cooldown[i] = 0
+                        self.cash += price[i] * sell_num_shares * (1 - self.sell_cost_pct)
+
+        if not cvix_active:
+            for i in range(self.action_dim):
+                norm_vector_i = self.action_norm_vector[i]
+                actions[i] = actions[i] * norm_vector_i
 
         # Compute actions in dollars
         actions_dollars = actions * price
 
-        # Sell
-        #######################################################################################################
-        #######################################################################################################
-        #######################################################################################################
+        # When CVIX is active, skip all normal trading
+        if not cvix_active:
+            # Sell
+            #######################################################################################################
+            #######################################################################################################
+            #######################################################################################################
 
-        for index in np.where(actions < -self.minimum_qty_alpaca)[0]:
+            for index in np.where(actions < -self.minimum_qty_alpaca)[0]:
 
-            if self.stocks[index] > 0:
+                if self.stocks[index] > 0:
 
-                if price[index] > 0:  # Sell only if current asset is > 0
-                    sell_num_shares = min(self.stocks[index], -actions[index])
+                    if price[index] > 0:  # Sell only if current asset is > 0
+                        sell_num_shares = min(self.stocks[index], -actions[index])
 
-                    assert sell_num_shares >= 0, "Negative sell!"
+                        assert sell_num_shares >= 0, "Negative sell!"
 
-                    self.stocks_cooldown[index] = 0
-                    self.stocks[index] -= sell_num_shares
-                    self.cash += price[index] * sell_num_shares * (1 - self.sell_cost_pct)
+                        self.stocks_cooldown[index] = 0
+                        self.stocks[index] -= sell_num_shares
+                        self.cash += price[index] * sell_num_shares * (1 - self.sell_cost_pct)
 
-        # FORCE 5% SELL every half day (30 min timeframe -> (24 * 2 / 2) * 30)
-        for index in np.where(self.stocks_cooldown >= 48)[0]:
-            sell_num_shares = self.stocks[index] * 0.05
-            self.stocks_cooldown[index] = 0
-            self.stocks[index] -= sell_num_shares
-            self.cash += price[index] * sell_num_shares * (1 - self.sell_cost_pct)
+            # FORCE 5% SELL every half day (30 min timeframe -> (24 * 2 / 2) * 30)
+            for index in np.where(self.stocks_cooldown >= 48)[0]:
+                sell_num_shares = self.stocks[index] * 0.05
+                self.stocks_cooldown[index] = 0
+                self.stocks[index] -= sell_num_shares
+                self.cash += price[index] * sell_num_shares * (1 - self.sell_cost_pct)
 
-        # Buy
-        #######################################################################################################
-        #######################################################################################################
-        #######################################################################################################
+            # Buy
+            #######################################################################################################
+            #######################################################################################################
+            #######################################################################################################
 
-        for index in np.where(actions > self.minimum_qty_alpaca)[0]:
-            if price[index] > 0:  # Buy only if the price is > 0 (no missing data in this particular date)
+            for index in np.where(actions > self.minimum_qty_alpaca)[0]:
+                if price[index] > 0:  # Buy only if the price is > 0 (no missing data in this particular date)
 
-                fee_corrected_asset = self.cash / (1 + self.buy_cost_pct)
-                max_stocks_can_buy = (fee_corrected_asset / price[index]) * self.safety_factor_stock_buy
-                buy_num_shares = min(max_stocks_can_buy, actions[index])
-                buy_num_shares_old = buy_num_shares
-                if buy_num_shares < self.minimum_qty_alpaca[index]:
-                    buy_num_shares = 0
-                self.stocks[index] += buy_num_shares
-                self.cash -= price[index] * buy_num_shares * (1 + self.buy_cost_pct)
+                    fee_corrected_asset = self.cash / (1 + self.buy_cost_pct)
+                    max_stocks_can_buy = (fee_corrected_asset / price[index]) * self.safety_factor_stock_buy
+                    buy_num_shares = min(max_stocks_can_buy, actions[index])
+                    buy_num_shares_old = buy_num_shares
+                    if buy_num_shares < self.minimum_qty_alpaca[index]:
+                        buy_num_shares = 0
+                    self.stocks[index] += buy_num_shares
+                    self.cash -= price[index] * buy_num_shares * (1 + self.buy_cost_pct)
 
         """update time"""
         done = self.time == self.max_step
@@ -173,7 +196,7 @@ class CryptoEnvAlpaca:  # custom env
     def get_state(self):
         state = np.hstack((self.cash * self.norm_cash, self.stocks * self.norm_stocks))
         for i in range(self.lookback):
-            tech_i = self.tech_array[-1 - i]
+            tech_i = self.tech_array[self.time - i]
             normalized_tech_i = tech_i * self.norm_tech
             state = np.hstack((state, normalized_tech_i)).astype(np.float32)
         return state
