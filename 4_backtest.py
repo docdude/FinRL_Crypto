@@ -164,7 +164,7 @@ def load_and_process_data(TIMEFRAME, trade_start_date, trade_end_date):
 print('TRADE_START_DATE             ', trade_start_date)
 print('TRADE_END_DATE               ', trade_end_date, '\n')
 
-pickle_results = ["res_2026-02-18__05_04_45_model_CPCV_ppo_5m_50H_25k",
+pickle_results = ["res_2026-02-19__22_51_13_model_CPCV_ppo_5m_50H_25k",
                   ]
 
 # Execution

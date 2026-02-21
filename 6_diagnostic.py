@@ -39,7 +39,7 @@ from config_main import (
 )
 from environment_Alpaca import CryptoEnvAlpaca
 from drl_agents.elegantrl_models import DRLAgent as DRLAgent_erl
-
+SEED_CFG = 0
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Paper Table 2 — PPO CPCV best hyperparameters (LOCKED)
@@ -109,7 +109,7 @@ def compute_eqw(price_ary, indx1, indx2):
     return account_value_eqw, eqw_rets_tmp, eqw_cumrets
 
 
-def train_and_test(erl_params, env_params, seed=0):
+def train_and_test(erl_params, env_params, seed=0, no_cvix=False):
     """Train on full training data → test on trade period (paper methodology)."""
 
     # ── Load data ──
@@ -154,7 +154,10 @@ def train_and_test(erl_params, env_params, seed=0):
     import pandas as pd
 
     cvix_array = None
-    try:
+    if no_cvix:
+        print('  CVIX disabled (--no-cvix flag)')
+    else:
+      try:
         ts_start = datetime.strptime(trade_start_date[:10], '%Y-%m-%d').replace(tzinfo=timezone.utc)
         ts_end = datetime.strptime(trade_end_date[:10], '%Y-%m-%d').replace(tzinfo=timezone.utc)
         start_ms = int(ts_start.timestamp() * 1000)
@@ -193,7 +196,7 @@ def train_and_test(erl_params, env_params, seed=0):
               f'range {np.nanmin(cvix_array):.1f}-{np.nanmax(cvix_array):.1f}')
         n_above = np.nansum(cvix_array > 90.1)
         print(f'  Bars above CVIX threshold 90.1: {n_above} ({n_above/len(cvix_array)*100:.1f}%)')
-    except Exception as e:
+      except Exception as e:
         print(f'  CVIX download failed: {e} — testing WITHOUT risk control')
 
     env_instance = CryptoEnvAlpaca(
@@ -321,6 +324,8 @@ def main():
     parser = argparse.ArgumentParser(description='Paper reproduction diagnostic')
     parser.add_argument('--seeds', type=int, default=1,
                         help='Number of seeds to try (default: 1)')
+    parser.add_argument('--no-cvix', action='store_true',
+                        help='Disable CVIX risk control')
     args = parser.parse_args()
 
     erl_params = PAPER_ERL_PARAMS
@@ -338,7 +343,7 @@ def main():
     all_results = []
     for i in range(args.seeds):
         seed = SEED_CFG + i
-        r = train_and_test(erl_params, env_params, seed=seed)
+        r = train_and_test(erl_params, env_params, seed=seed, no_cvix=args.no_cvix)
         print_results(r)
         all_results.append(r)
     print_summary(all_results)

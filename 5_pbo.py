@@ -72,7 +72,7 @@ def build_matrix_M_no_splits(trials, number_of_trials):
 #######################################################################################################
 
 pickle_results = [
-                  "res_2026-02-18__05_04_45_model_CPCV_ppo_5m_50H_25k",
+                  "res_2026-02-19__22_51_13_model_CPCV_ppo_5m_50H_25k",
                   ]
 S = 14  # Paper: "We split M into 14 submatrices"
 
